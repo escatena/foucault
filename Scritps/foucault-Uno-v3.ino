@@ -29,25 +29,25 @@ enum EstadoSistema {
 EstadoSistema estadoSistema = CICLO_INATIVO;
 
 // =====================================================
-// ============== TEMPORIZAÇÃO ORIGINAL =================
+// ============== TEMPORIZAÇÃO =========================
 // =====================================================
 
 unsigned long tempoPico = 0;
 unsigned long tempoEntrePicos = 0;
 
-unsigned long eletroimaEmpurraStart = 0;
-unsigned long eletroimaPuxaStart = 0;
-unsigned long eletroimaOffTime = 0;
+unsigned long eletroimaEmpurraStart = 0; // instante no qual o eletroímã é ligado para 'empurrar'
+unsigned long eletroimaPuxaStart = 0; // instante no qual o eletroímã é ligado para 'puxar'
+unsigned long eletroimaOffTime = 0;   // instante no qual o eletroímã é desligado
 
-const unsigned long delayEmpurra = 50;
-const unsigned long tempoEmpurrando = 200;
+const unsigned long delayEmpurra = 50; // delay para ligar o eletroímã para empurrar
+const unsigned long tempoEmpurrando = 200; // tempo empurrando
 
-const unsigned long delayPuxa = 100;
-const unsigned long tempoPuxando = 50;
+const unsigned long delayPuxa = 100; // delay para ligar o eletroímã para empurrar
+const unsigned long tempoPuxando = 100; //tempo puxando
 
-const unsigned long delayMedida = 350;
+const unsigned long delayMedida = 350; // delay para realizar a medida dos ângulos
 
-const unsigned long tempoMinimoEntrePicos = 700;
+const unsigned long tempoMinimoEntrePicos = 1000; // tempo mínimo entre os picos (para evitar medidas espúrias)
 const double toleranciaPico = 2;
 
 // =====================================================
@@ -55,9 +55,9 @@ const double toleranciaPico = 2;
 // =====================================================
 
 double x_value, y_value, z_value;
-double x_offset = -34;
-double y_offset = -195;
-double z_offset = 215;
+double x_offset = 0;
+double y_offset = 0;
+double z_offset = 0;
 
 bool medidaPronta = false;
 bool medidaFeita = false;
@@ -113,12 +113,11 @@ void loop() {
 }
 
 // =====================================================
-// ============= CONTROLE (TEMPORAL ORIGINAL) =========
+// ============= CONTROLE  =============================
 // =====================================================
 
 void atualizarControle(unsigned long agora) {
 
-  // Detecta pico exatamente como no original
   if (detectaPico(z_value)) {
 
     tempoEntrePicos = agora - tempoPico;
@@ -171,7 +170,7 @@ void atualizarControle(unsigned long agora) {
 }
 
 // =====================================================
-// ================= MEDIÇÃO SEPARADA ==================
+// ================= MEDIÇÃO ===========================
 // =====================================================
 
 void atualizarMedicao(unsigned long agora) {
