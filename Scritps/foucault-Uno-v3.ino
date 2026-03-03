@@ -4,70 +4,70 @@
 QMC5883LCompass compass;
 
 // =====================================================
-// ================= PINOS =============================
+// ================= PINS ==============================
 // =====================================================
 
-#define R_PWM 5
-#define L_PWM 4
-#define R_Enable 3
-#define L_Enable 2
-#define Led2 8
-#define Led1 9
+#define RIGHT_PWM 5
+#define LEFT_PWM 4
+#define RIGHT_ENABLE 3
+#define LEFT_ENABLE 2
+#define LED_MEASURE 8
+#define LED_COIL 9
 
 // =====================================================
-// ============== ESTADOS ==============================
+// ================= STATES ============================
 // =====================================================
 
-enum EstadoEletroima { DESLIGA, PUXA, EMPURRA };
-EstadoEletroima estadoEletroima = DESLIGA;
+enum ElectromagnetState { OFF, PULL, PUSH };
+ElectromagnetState electromagnetState = OFF;
 
-enum EstadoSistema {
-  CICLO_INATIVO,
-  CICLO_ATIVO
+enum SystemState {
+  CYCLE_IDLE,
+  CYCLE_ACTIVE
 };
 
-EstadoSistema estadoSistema = CICLO_INATIVO;
+SystemState systemState = CYCLE_IDLE;
 
 // =====================================================
-// ============== TEMPORIZAÇÃO =========================
+// ================= TIMING ============================
 // =====================================================
 
-unsigned long tempoPico = 0;
-unsigned long tempoEntrePicos = 0;
+unsigned long peakTime = 0;
+unsigned long timeBetweenPeaks = 0;
 
-unsigned long eletroimaEmpurraStart = 0; // instante no qual o eletroímã é ligado para 'empurrar'
-unsigned long eletroimaPuxaStart = 0; // instante no qual o eletroímã é ligado para 'puxar'
-unsigned long eletroimaOffTime = 0;   // instante no qual o eletroímã é desligado
+unsigned long pushStartTime = 0;
+unsigned long pullStartTime = 0;
+unsigned long electromagnetOffTime = 0;
 
-const unsigned long delayEmpurra = 50; // delay para ligar o eletroímã para empurrar
-const unsigned long tempoEmpurrando = 200; // tempo empurrando
+const unsigned long pushDelay = 50;
+const unsigned long pushDuration = 200;
 
-const unsigned long delayPuxa = 100; // delay para ligar o eletroímã para empurrar
-const unsigned long tempoPuxando = 100; //tempo puxando
+const unsigned long pullDelay = 100;
+const unsigned long pullDuration = 100;
 
-const unsigned long delayMedida = 350; // delay para realizar a medida dos ângulos
+const unsigned long measurementDelay = 350;
 
-const unsigned long tempoMinimoEntrePicos = 1000; // tempo mínimo entre os picos (para evitar medidas espúrias)
-const double toleranciaPico = 2;
+const unsigned long minimumTimeBetweenPeaks = 1000;
+const double peakTolerance = 2;
 
 // =====================================================
 // ================= SENSOR ============================
 // =====================================================
 
-double x_value, y_value, z_value;
-double x_offset = 0;
-double y_offset = 0;
-double z_offset = 0;
+double xValue, yValue, zValue;
+double xOffset = 0;
+double yOffset = 0;
+double zOffset = 0;
 
-bool medidaPronta = false;
-bool medidaFeita = false;
-bool OffFlag = false;
+bool measurementReady = false;
+bool measurementDone = false;
+bool offWindowActive = false;
 
-double delta_x[2];
-double delta_y[2];
-int count_angle = 0;
-double angulo;
-double tempoAngulo;
+double deltaX[2];
+double deltaY[2];
+int angleSampleCount = 0;
+double angle;
+double angleTime;
 
 // =====================================================
 // ===================== SETUP =========================
@@ -81,15 +81,15 @@ void setup() {
   compass.setSmoothing(10, true);
   compass.setCalibrationScales(0.1, 0.1, 0.1);
 
-  pinMode(R_PWM, OUTPUT);
-  pinMode(L_PWM, OUTPUT);
-  pinMode(L_Enable, OUTPUT);
-  pinMode(R_Enable, OUTPUT);
-  pinMode(Led1, OUTPUT);
-  pinMode(Led2, OUTPUT);
+  pinMode(RIGHT_PWM, OUTPUT);
+  pinMode(LEFT_PWM, OUTPUT);
+  pinMode(LEFT_ENABLE, OUTPUT);
+  pinMode(RIGHT_ENABLE, OUTPUT);
+  pinMode(LED_COIL, OUTPUT);
+  pinMode(LED_MEASURE, OUTPUT);
 
-  digitalWrite(L_Enable, HIGH);
-  digitalWrite(R_Enable, HIGH);
+  digitalWrite(LEFT_ENABLE, HIGH);
+  digitalWrite(RIGHT_ENABLE, HIGH);
 
   delay(1000);
 }
@@ -99,206 +99,207 @@ void setup() {
 // =====================================================
 
 void loop() {
-  digitalWrite(Led2, LOW);   
 
-  unsigned long agora = millis();
+  digitalWrite(LED_MEASURE, LOW);
 
-  atualizarSensor();
-  atualizarControle(agora);
-  atualizarMedicao(agora);
+  unsigned long now = millis();
 
-  PlotXYZ(); 
+  updateSensor();
+  updateControl(now);
+  updateMeasurement(now);
 
-  medidaFeita = false;
+  sendSerialData();
+
+  measurementDone = false;
 }
 
 // =====================================================
-// ============= CONTROLE  =============================
+// ================= CONTROL ===========================
 // =====================================================
 
-void atualizarControle(unsigned long agora) {
+void updateControl(unsigned long now) {
 
-  if (detectaPico(z_value)) {
+  if (detectPeak(zValue)) {
 
-    tempoEntrePicos = agora - tempoPico;
-    tempoPico = agora;
+    timeBetweenPeaks = now - peakTime;
+    peakTime = now;
 
-    eletroimaEmpurraStart = agora + delayEmpurra;
-    eletroimaPuxaStart    = agora + tempoEntrePicos / 2 + delayPuxa;
+    pushStartTime = now + pushDelay;
+    pullStartTime = now + timeBetweenPeaks / 2 + pullDelay;
 
-    estadoSistema = CICLO_ATIVO;
-    
+    systemState = CYCLE_ACTIVE;
   }
 
-  if (estadoSistema != CICLO_ATIVO)
+  if (systemState != CYCLE_ACTIVE)
     return;
 
-  // ===== EMPURRA =====
-  if (agora >= eletroimaEmpurraStart &&
-      agora <= eletroimaEmpurraStart + tempoEmpurrando) {
+  // ===== PUSH WINDOW =====
+  if (now >= pushStartTime &&
+      now <= pushStartTime + pushDuration) {
 
-    controlaEletroima(DESLIGA);   // Configurado somente para puxar o pêndulo. Trocar por "EMPURRA" para empurrar.
+    controlElectromagnet(OFF);   // Change to PUSH to actively push
   }
 
-  // ===== PUXA =====
-  else if (agora >= eletroimaPuxaStart &&
-           agora <= eletroimaPuxaStart + tempoPuxando) {
+  // ===== PULL WINDOW =====
+  else if (now >= pullStartTime &&
+           now <= pullStartTime + pullDuration) {
 
-    controlaEletroima(PUXA);
+    controlElectromagnet(PULL);
   }
 
-  // ===== JANELA MEDIÇÃO =====
-  else if (agora >= eletroimaEmpurraStart + tempoEmpurrando &&
-           agora < eletroimaPuxaStart) {
+  // ===== MEASUREMENT WINDOW =====
+  else if (now >= pushStartTime + pushDuration &&
+           now < pullStartTime) {
 
-    controlaEletroima(DESLIGA);
+    controlElectromagnet(OFF);
 
-    if (!OffFlag) {
-      eletroimaOffTime = agora;
-      OffFlag = true;
+    if (!offWindowActive) {
+      electromagnetOffTime = now;
+      offWindowActive = true;
     }
   }
 
-  // ===== FIM DO CICLO =====
-  else if (agora > eletroimaPuxaStart + tempoPuxando) {
+  // ===== END OF CYCLE =====
+  else if (now > pullStartTime + pullDuration) {
 
-    controlaEletroima(DESLIGA);
-    OffFlag = false;
-    medidaPronta = false;
-    estadoSistema = CICLO_INATIVO;
+    controlElectromagnet(OFF);
+    offWindowActive = false;
+    measurementReady = false;
+    systemState = CYCLE_IDLE;
   }
 }
 
 // =====================================================
-// ================= MEDIÇÃO ===========================
+// ================= MEASUREMENT =======================
 // =====================================================
 
-void atualizarMedicao(unsigned long agora) {
+void updateMeasurement(unsigned long now) {
 
-  if (!OffFlag) return;
-  if (estadoEletroima != DESLIGA) return;
-  if (agora <= eletroimaOffTime + delayMedida) return;
-  if (medidaPronta) return;
-  
+  if (!offWindowActive) return;
+  if (electromagnetState != OFF) return;
+  if (now <= electromagnetOffTime + measurementDelay) return;
+  if (measurementReady) return;
 
-  digitalWrite(Led2, HIGH);
+  digitalWrite(LED_MEASURE, HIGH);
 
-  medidaPronta = true;
-  medidaFeita  = true;
+  measurementReady = true;
+  measurementDone = true;
 
-  CalculaAngulo(tempoAngulo, angulo);
+  calculateAngle(angleTime, angle);
 }
 
 // =====================================================
-// ============== DETECÇÃO DE PICO =====================
+// ================= PEAK DETECTION ====================
 // =====================================================
 
-bool detectaPico(double valorAtual) {
+bool detectPeak(double currentValue) {
 
-  static double valorAnterior = 0;
-  static bool subindo = false;
+  static double previousValue = 0;
+  static bool rising = false;
 
-  if (abs(valorAtual - valorAnterior) > toleranciaPico) {
+  if (abs(currentValue - previousValue) > peakTolerance) {
 
-    if (valorAtual > valorAnterior)
-      subindo = true;
+    if (currentValue > previousValue)
+      rising = true;
 
-    else if (subindo && valorAtual < valorAnterior) {
+    else if (rising && currentValue < previousValue) {
 
-      subindo = false;
+      rising = false;
 
-      if (millis() - tempoPico > tempoMinimoEntrePicos) {
-        valorAnterior = valorAtual;
+      if (millis() - peakTime > minimumTimeBetweenPeaks) {
+        previousValue = currentValue;
         return true;
       }
     }
   }
 
-  valorAnterior = valorAtual;
+  previousValue = currentValue;
   return false;
 }
 
 // =====================================================
-// ============== CONTROLE ELETROÍMÃ ===================
+// ============ ELECTROMAGNET CONTROL ==================
 // =====================================================
 
-void controlaEletroima(EstadoEletroima estado) {
+void controlElectromagnet(ElectromagnetState state) {
 
-  estadoEletroima = estado;
-  switch (estado) {
+  electromagnetState = state;
 
-    case DESLIGA:
-      digitalWrite(R_PWM, LOW);
-      digitalWrite(L_PWM, LOW);
-      digitalWrite(Led1, LOW);
+  switch (state) {
+
+    case OFF:
+      digitalWrite(RIGHT_PWM, LOW);
+      digitalWrite(LEFT_PWM, LOW);
+      digitalWrite(LED_COIL, LOW);
       break;
 
-    case PUXA:
-      digitalWrite(R_PWM, LOW);
-      digitalWrite(L_PWM, HIGH);
-      digitalWrite(Led1, HIGH);
+    case PULL:
+      digitalWrite(RIGHT_PWM, LOW);
+      digitalWrite(LEFT_PWM, HIGH);
+      digitalWrite(LED_COIL, HIGH);
       break;
 
-    case EMPURRA:
-      digitalWrite(R_PWM, HIGH);
-      digitalWrite(L_PWM, LOW);
-      digitalWrite(Led1, HIGH);
+    case PUSH:
+      digitalWrite(RIGHT_PWM, HIGH);
+      digitalWrite(LEFT_PWM, LOW);
+      digitalWrite(LED_COIL, HIGH);
       break;
   }
 }
 
 // =====================================================
-// ================= SENSOR ============================
+// ================= SENSOR UPDATE =====================
 // =====================================================
 
-void atualizarSensor() {
+void updateSensor() {
   compass.read();
-  x_value = compass.getX() + x_offset;
-  y_value = compass.getY() + y_offset;
-  z_value = compass.getZ() + z_offset;
+  xValue = compass.getX() + xOffset;
+  yValue = compass.getY() + yOffset;
+  zValue = compass.getZ() + zOffset;
 }
 
 // =====================================================
-// ================= ÂNGULO ============================
+// ================= ANGLE =============================
 // =====================================================
 
-void CalculaAngulo(double &time_angle, double &angle) {
+void calculateAngle(double &timeAngle, double &computedAngle) {
 
-  delta_x[count_angle] = x_value;
-  delta_y[count_angle] = y_value;
-  count_angle++;
+  deltaX[angleSampleCount] = xValue;
+  deltaY[angleSampleCount] = yValue;
+  angleSampleCount++;
 
-  if (count_angle < 2) return;
+  if (angleSampleCount < 2) return;
 
-  count_angle = 0;
+  angleSampleCount = 0;
 
-  if (delta_x[1] == delta_x[0]) return;
+  if (deltaX[1] == deltaX[0]) return;
 
-  angle = atan((delta_y[1] - delta_y[0]) /
-               (delta_x[1] - delta_x[0])) * 180.0 / PI;
+  computedAngle = atan((deltaY[1] - deltaY[0]) /
+                       (deltaX[1] - deltaX[0])) * 180.0 / PI;
 
-  if (angle < 0) angle += 180;
+  if (computedAngle < 0)
+    computedAngle += 180;
 
-  time_angle = millis();
+  timeAngle = millis();
 }
 
 // =====================================================
-// ================= SERIAL ============================
+// ================= SERIAL OUTPUT =====================
 // =====================================================
 
-void PlotXYZ() {
+void sendSerialData() {
 
   Serial.print(millis());
   Serial.print(" ; ");
-  Serial.print(x_value);
+  Serial.print(xValue);
   Serial.print(" ; ");
-  Serial.print(y_value);
+  Serial.print(yValue);
   Serial.print(" ; ");
-  Serial.print(z_value);
+  Serial.print(zValue);
   Serial.print(" ; ");
-  Serial.print(tempoAngulo);
+  Serial.print(angleTime);
   Serial.print(" ; ");
-  Serial.print(angulo);
+  Serial.print(angle);
   Serial.print(" ; ");
-  Serial.println(medidaFeita);
+  Serial.println(measurementDone);
 }
