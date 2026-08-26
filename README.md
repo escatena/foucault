@@ -2,10 +2,7 @@
 # 📺 Watch the video
 
 [![Watch on YouTube](https://img.youtube.com/vi/r8lBbuhs2y4/0.jpg)](https://www.youtube.com/watch?v=r8lBbuhs2y4)
-
-or click in the link bellow:
-
-https://www.youtube.com/watch?v=r8lBbuhs2y4
+[![Watch on YouTube](https://img.youtube.com/vi/r8lBbuhs2y4/0.jpg)](https://www.youtube.com/watch?v=cCXCGMFah08)
 
 ---
 
